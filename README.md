@@ -22,8 +22,10 @@ ShurikenMail is a Python-based desktop application for sending bulk emails with 
 Installation
 Clone the repository:
 bash
-git clone https://github.com/your-repo/shurikenmail.git
+```
+git clone https://github.com/calebpentest/SHURIKENMAIL.git
 cd shurikenmail
+```
 Install dependencies (see above).
 Run the application:
 bash
