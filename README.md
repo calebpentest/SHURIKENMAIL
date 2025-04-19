@@ -24,7 +24,7 @@ Clone the repository:
 bash
 ```
 git clone https://github.com/calebpentest/SHURIKENMAIL.git
-cd shurikenmail
+cd SHURIKENMAIL
 ```
 Install dependencies (see above).
 Run the application:
