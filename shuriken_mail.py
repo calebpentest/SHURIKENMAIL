@@ -5,13 +5,11 @@ import logging
 import logging.handlers
 import os
 import json
-import random
 import time
 from threading import Thread
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import keyring
-import requests
 from cryptography.fernet import Fernet
 import csv
 import re
@@ -21,14 +19,45 @@ from email import encoders
 
 # Configure encrypted logging
 log_file = "shurikenmail_log.enc"
+audit_log_file = "shurikenmail_audit.log"
+class SanitizeFilter(logging.Filter):
+    def filter(self, record):
+        record.msg = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '[REDACTED_EMAIL]', str(record.msg))
+        return True
+
+class EncryptedFileHandler(logging.handlers.RotatingFileHandler):
+    def __init__(self, filename, cipher, mode='ab', maxBytes=0, backupCount=0, encoding=None, delay=False):
+        super().__init__(filename, mode, maxBytes, backupCount, encoding, delay)
+        self.cipher = cipher
+        if not os.path.exists(filename):
+            with open(filename, 'wb') as f:
+                f.write(self.cipher.encrypt(b"ShurikenMail Log Start\n"))
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            encrypted_msg = self.cipher.encrypt(msg.encode())
+            with open(self.baseFilename, 'ab') as f:
+                f.write(encrypted_msg + b'\n')
+                f.flush()
+            self.shouldRollover(record)
+        except Exception as e:
+            print(f"Logging error: {e}")
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.handlers.RotatingFileHandler(log_file, maxBytes=1048576, backupCount=5),
-        logging.StreamHandler()  # Log to console
-    ]
+    handlers=[]
 )
+logger = logging.getLogger()
+logger.addFilter(SanitizeFilter())
+
+# Audit logging
+audit_logger = logging.getLogger('audit')
+audit_handler = logging.handlers.RotatingFileHandler(audit_log_file, maxBytes=1048576, backupCount=5)
+audit_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+audit_logger.addHandler(audit_handler)
+audit_logger.setLevel(logging.INFO)
 
 class Tooltip:
     def __init__(self, widget, text):
@@ -52,7 +81,7 @@ class Tooltip:
         self.tooltip_window = tk.Toplevel(self.widget)
         self.tooltip_window.wm_overrideredirect(True)
         self.tooltip_window.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(self.tooltip_window, text=self.text, background="#f0f0f0", foreground="#333333",
+        label = tk.Label(self.tooltip_window, text=self.text, background="#FFFFFF", foreground="#000000",
                          relief="solid", borderwidth=1, font=("Segoe UI", 8), wraplength=150, padx=5, pady=3)
         label.pack()
         self.fade_in()
@@ -113,256 +142,306 @@ class ShurikenMail:
         self.config_file = "shurikenmail_config.json"
         self.config = {}
         self.load_config()
-        self.is_dark_mode = self.config.get("theme", "light") == "dark"
         self.notification_queue = []
+
+        # Initialize cipher and logging
+        try:
+            self.cipher = self.init_cipher()
+            logger.addHandler(EncryptedFileHandler(log_file, self.cipher, maxBytes=1048576, backupCount=5))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize encryption: {e}")
+            raise
+
+        # PIN authentication
+        if not self.authenticate_user():
+            self.root.destroy()
+            return
+
+        # Ethical use disclaimer
+        messagebox.showwarning(
+            "Use it at your own risk",
+            "ShurikenMail is for authorized phishing tests only. Use without permission is illegal and unethical."
+        )
 
         try:
             self.setup_gui()
-            self.cipher = self.init_cipher()
             self.save_config()
         except Exception as e:
             logging.error(f"Initialization failed: {e}")
             messagebox.showerror("Error", f"Failed to start ShurikenMail: {e}")
             raise
 
+    def authenticate_user(self):
+        pin = keyring.get_password("ShurikenMail", "app_pin")
+        if not pin:
+            pin = "1234"  # Default PIN
+            keyring.set_password("ShurikenMail", "app_pin", pin)
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Authentication")
+        dialog.geometry("300x150")
+        dialog.resizable(False, False)
+        ttk.Label(dialog, text="Enter PIN:", font=("Segoe UI", 9)).pack(pady=10)
+        pin_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=pin_var, show="*", font=("Segoe UI", 9)).pack(pady=5)
+        result = [False]
+        def verify():
+            if pin_var.get() == pin:
+                result[0] = True
+                dialog.destroy()
+            else:
+                messagebox.showerror("Error", "Invalid PIN")
+        ttk.Button(dialog, text="Submit", command=verify).pack(pady=10)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        return result[0]
+
     def setup_gui(self):
         self.style = ttk.Style()
         self.style.theme_use("clam")
         self.configure_styles()
 
-        self.root.configure(bg="#f5f5f5" if not self.is_dark_mode else "#252526")
+        self.root.configure(bg="#FFFFFF")
         self.root.bind("<Control-s>", lambda e: self.save_config())
         self.root.bind("<Control-p>", lambda e: self.update_preview())
         self.root.bind("<Control-Return>", lambda e: self.start_sending())
 
-        self.toolbar = tk.Frame(self.root, bg="#0078d4", height=30)
+        self.toolbar = tk.Frame(self.root, bg="#0078D4", height=30)
         self.toolbar.pack(fill=tk.X)
-        self.logo_label = tk.Label(self.toolbar, text="ShurikenMail", font=("Segoe UI Semibold", 12), fg="#ffffff", bg="#0078d4")
-        self.logo_label.pack(side=tk.LEFT, padx=5)
-        self.save_config_button = tk.Button(self.toolbar, text="💾", font=("Segoe UI", 10), bg="#0078d4", fg="#ffffff", bd=0, command=self.save_config)
-        self.save_config_button.pack(side=tk.LEFT, padx=5)
+        self.logo_label = tk.Label(self.toolbar, text="ShurikenMail", font=("Segoe UI Semibold", 12), fg="#FFFFFF", bg="#0078D4")
+        self.logo_label.pack(side=tk.LEFT, padx=10)
+        self.save_config_button = tk.Button(self.toolbar, text="Save", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.save_config)
+        self.save_config_button.pack(side=tk.LEFT, padx=10)
         Tooltip(self.save_config_button, "Save configuration (Ctrl+S)")
-        self.clear_form_button = tk.Button(self.toolbar, text="🗑️", font=("Segoe UI", 10), bg="#0078d4", fg="#ffffff", bd=0, command=self.clear_form)
-        self.clear_form_button.pack(side=tk.LEFT, padx=5)
+        self.clear_form_button = tk.Button(self.toolbar, text="Clear", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.clear_form)
+        self.clear_form_button.pack(side=tk.LEFT, padx=10)
         Tooltip(self.clear_form_button, "Clear form")
-        self.theme_button = tk.Button(self.toolbar, text="🌙" if not self.is_dark_mode else "☀️", font=("Segoe UI", 10), bg="#0078d4", fg="#ffffff", bd=0, command=self.toggle_theme)
-        self.theme_button.pack(side=tk.RIGHT, padx=5)
-        Tooltip(self.theme_button, "Toggle light/dark mode")
-        for btn in [self.save_config_button, self.clear_form_button, self.theme_button]:
-            btn.bind("<Enter>", lambda e, b=btn: b.config(bg="#005a9e"))
-            btn.bind("<Leave>", lambda e, b=btn: b.config(bg="#0078d4"))
+        for btn in [self.save_config_button, self.clear_form_button]:
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg="#005A9E"))
+            btn.bind("<Leave>", lambda e, b=btn: b.config(bg="#0078D4"))
 
-        self.sidebar = tk.Frame(self.root, bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", width=50)
+        self.sidebar = tk.Frame(self.root, bg="#FFFFFF", width=50)
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
         self.consent_var = tk.BooleanVar()
-        self.consent_label = ttk.Label(self.sidebar, text="✔" if self.consent_var.get() else "☐", font=("Segoe UI", 10))
-        self.consent_label.pack(pady=10)
+        self.consent_frame = tk.Frame(self.sidebar, bg="#FFFFFF")
+        self.consent_frame.pack(pady=10)
+        self.consent_label = ttk.Label(self.consent_frame, text="✔" if self.consent_var.get() else "☐", font=("Segoe UI", 10))
+        self.consent_label.pack(side=tk.LEFT)
+        ttk.Label(self.consent_frame, text="Authorized Use", font=("Segoe UI", 9), foreground="#D32F2F").pack(side=tk.LEFT, padx=5)
         self.consent_label.bind("<Button-1>", self.toggle_consent)
-        self.consent_label.bind("<Enter>", lambda e: self.consent_label.config(background="#e0e0e0" if not self.is_dark_mode else "#333333"))
-        self.consent_label.bind("<Leave>", lambda e: self.consent_label.config(background="#f5f5f5" if not self.is_dark_mode else "#1e1e1e"))
-        Tooltip(self.consent_label, "Confirm ethical use\nRequired to send emails")
+        self.consent_label.bind("<Enter>", lambda e: self.consent_label.config(background="#F0F0F0"))
+        self.consent_label.bind("<Leave>", lambda e: self.consent_label.config(background="#FFFFFF"))
+        Tooltip(self.consent_label, "Confirm authorized use only\nRequired to send emails")
 
-        self.main_frame = tk.Frame(self.root, bg="#f5f5f5" if not self.is_dark_mode else "#252526")
-        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.main_frame = tk.Frame(self.root, bg="#FFFFFF")
+        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.notebook = ttk.Notebook(self.main_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
         self.smtp_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.smtp_tab, text="SMTP Settings")
-        self.smtp_frame = ttk.Frame(self.smtp_tab, padding="5")
+        self.smtp_frame = ttk.Frame(self.smtp_tab, padding="10")
         self.smtp_frame.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(self.smtp_frame, text="SMTP Server:", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=2)
+        ttk.Label(self.smtp_frame, text="SMTP Server:", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=5)
         self.smtp_var = tk.StringVar(value=self.config.get("smtp_server", "smtp.gmail.com"))
-        ttk.Combobox(self.smtp_frame, textvariable=self.smtp_var, values=["smtp.gmail.com", "smtp.mail.yahoo.com", "smtp-mail.outlook.com"], font=("Segoe UI", 9)).grid(row=0, column=1, sticky="ew", padx=5)
-        ttk.Label(self.smtp_frame, text="SMTP Port:", font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Combobox(self.smtp_frame, textvariable=self.smtp_var, values=["smtp.gmail.com", "smtp.mail.yahoo.com", "smtp-mail.outlook.com"], font=("Segoe UI", 9), width=30).grid(row=0, column=1, sticky="ew", padx=10)
+        ttk.Label(self.smtp_frame, text="SMTP Port:", font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=5)
         self.port_var = tk.StringVar(value=self.config.get("smtp_port", "587"))
-        ttk.Entry(self.smtp_frame, textvariable=self.port_var, font=("Segoe UI", 9)).grid(row=1, column=1, sticky="ew", padx=5)
-        ttk.Label(self.smtp_frame, text="Your Email:", font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Entry(self.smtp_frame, textvariable=self.port_var, font=("Segoe UI", 9), width=30).grid(row=1, column=1, sticky="ew", padx=10)
+        ttk.Label(self.smtp_frame, text="Your Email:", font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=5)
         self.email_var = tk.StringVar(value=self.config.get("email", ""))
-        ttk.Entry(self.smtp_frame, textvariable=self.email_var, font=("Segoe UI", 9)).grid(row=2, column=1, sticky="ew", padx=5)
-        ttk.Label(self.smtp_frame, text="Password/App Key:", font=("Segoe UI", 9)).grid(row=3, column=0, sticky="w", pady=2)
+        ttk.Entry(self.smtp_frame, textvariable=self.email_var, font=("Segoe UI", 9), width=30).grid(row=2, column=1, sticky="ew", padx=10)
+        ttk.Label(self.smtp_frame, text="Password/App Key:", font=("Segoe UI", 9)).grid(row=3, column=0, sticky="w", pady=5)
         self.pass_var = tk.StringVar()
-        ttk.Entry(self.smtp_frame, textvariable=self.pass_var, show="*", font=("Segoe UI", 9)).grid(row=3, column=1, sticky="ew", padx=5)
-        self.save_keyring_button = tk.Button(self.smtp_frame, text="🔒", font=("Segoe UI", 9), bg="#e0e0e0" if not self.is_dark_mode else "#333333", fg="#333333" if not self.is_dark_mode else "#ffffff", bd=0, command=self.save_password)
-        self.save_keyring_button.grid(row=3, column=2, padx=5)
-        self.save_keyring_button.bind("<Enter>", lambda e: self.save_keyring_button.config(bg="#d0d0d0" if not self.is_dark_mode else "#444444"))
-        self.save_keyring_button.bind("<Leave>", lambda e: self.save_keyring_button.config(bg="#e0e0e0" if not self.is_dark_mode else "#333333"))
+        ttk.Entry(self.smtp_frame, textvariable=self.pass_var, show="*", font=("Segoe UI", 9), width=30).grid(row=3, column=1, sticky="ew", padx=10)
+        self.save_keyring_button = tk.Button(self.smtp_frame, text="Save Password", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.save_password)
+        self.save_keyring_button.grid(row=3, column=2, padx=10)
+        self.save_keyring_button.bind("<Enter>", lambda e: self.save_keyring_button.config(bg="#005A9E"))
+        self.save_keyring_button.bind("<Leave>", lambda e: self.save_keyring_button.config(bg="#0078D4"))
         Tooltip(self.save_keyring_button, "Save password securely")
 
         self.content_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.content_tab, text="Email Content")
-        self.content_frame = ttk.Frame(self.content_tab, padding="5")
+        self.content_frame = ttk.Frame(self.content_tab, padding="10")
         self.content_frame.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(self.content_frame, text="Recipient Emails:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=2)
-        self.targets_text = tk.Text(self.content_frame, height=4, width=40, font=("Segoe UI", 9), bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff")
-        self.targets_text.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5)
+        ttk.Label(self.content_frame, text="Recipient Emails:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=5)
+        self.targets_text = tk.Text(self.content_frame, height=4, width=50, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000")
+        self.targets_text.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10)
         self.targets_text.insert(tk.END, "Enter emails, one per line, or load a CSV")
         self.targets_text.bind("<FocusIn>", self.clear_placeholder)
         self.targets_text.bind("<FocusOut>", self.set_placeholder)
-        self.load_csv_button = tk.Button(self.content_frame, text="📂", font=("Segoe UI", 9), bg="#e0e0e0" if not self.is_dark_mode else "#333333", fg="#333333" if not self.is_dark_mode else "#ffffff", bd=0, command=self.load_csv)
-        self.load_csv_button.grid(row=1, column=2, padx=5)
-        self.load_csv_button.bind("<Enter>", lambda e: self.load_csv_button.config(bg="#d0d0d0" if not self.is_dark_mode else "#444444"))
-        self.load_csv_button.bind("<Leave>", lambda e: self.load_csv_button.config(bg="#e0e0e0" if not self.is_dark_mode else "#333333"))
+        self.load_csv_button = tk.Button(self.content_frame, text="Load CSV", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.load_csv)
+        self.load_csv_button.grid(row=1, column=2, padx=10)
+        self.load_csv_button.bind("<Enter>", lambda e: self.load_csv_button.config(bg="#005A9E"))
+        self.load_csv_button.bind("<Leave>", lambda e: self.load_csv_button.config(bg="#0078D4"))
         Tooltip(self.load_csv_button, "Load recipient list from CSV")
-        ttk.Label(self.content_frame, text="Emails per Recipient:", font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Label(self.content_frame, text="Emails per Recipient:", font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=5)
         self.count_var = tk.StringVar(value="1")
-        ttk.Combobox(self.content_frame, textvariable=self.count_var, values=["1", "25", "50", "100", "Custom"], font=("Segoe UI", 9)).grid(row=2, column=1, sticky="ew", padx=5)
+        ttk.Combobox(self.content_frame, textvariable=self.count_var, values=["1", "25", "50", "100", "Custom"], font=("Segoe UI", 9), width=30).grid(row=2, column=1, sticky="ew", padx=10)
         self.custom_count_var = tk.StringVar()
-        self.custom_count_entry = ttk.Entry(self.content_frame, textvariable=self.custom_count_var, state="disabled", font=("Segoe UI", 9))
-        self.custom_count_entry.grid(row=3, column=1, sticky="ew", padx=5)
+        self.custom_count_entry = ttk.Entry(self.content_frame, textvariable=self.custom_count_var, state="disabled", font=("Segoe UI", 9), width=30)
+        self.custom_count_entry.grid(row=3, column=1, sticky="ew", padx=10)
         self.count_var.trace("w", self.toggle_custom_count)
-        ttk.Label(self.content_frame, text="Subject:", font=("Segoe UI", 9)).grid(row=4, column=0, sticky="w", pady=2)
+        ttk.Label(self.content_frame, text="Subject:", font=("Segoe UI", 9)).grid(row=4, column=0, sticky="w", pady=5)
         self.subject_var = tk.StringVar(value="Test Email")
-        ttk.Entry(self.content_frame, textvariable=self.subject_var, font=("Segoe UI", 9)).grid(row=4, column=1, sticky="ew", padx=5)
-        ttk.Label(self.content_frame, text="Message:", font=("Segoe UI", 9)).grid(row=5, column=0, sticky="w", pady=2)
-        self.message_text = tk.Text(self.content_frame, height=5, width=40, font=("Segoe UI", 9), bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff")
-        self.message_text.grid(row=5, column=1, sticky="ew", padx=5)
+        self.subject_entry = ttk.Entry(self.content_frame, textvariable=self.subject_var, font=("Segoe UI", 9), width=30)
+        self.subject_entry.grid(row=4, column=1, sticky="ew", padx=10)
+        Tooltip(self.subject_entry, "Subject must be a single line (no newlines, max 78 characters)")
+        self.subject_char_count = ttk.Label(self.content_frame, text="0/78", font=("Segoe UI", 8))
+        self.subject_char_count.grid(row=4, column=2, sticky="w", padx=5)
+        self.subject_var.trace("w", self.update_subject_char_count)
+        ttk.Label(self.content_frame, text="Message:", font=("Segoe UI", 9)).grid(row=5, column=0, sticky="w", pady=5)
+        self.message_text = tk.Text(self.content_frame, height=5, width=50, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000")
+        self.message_text.grid(row=5, column=1, sticky="ew", padx=10)
         self.message_text.insert(tk.END, "Hello,\nThis is a test email from ShurikenMail.\nBest,\n{sender}")
-        ttk.Label(self.content_frame, text="Attachments:", font=("Segoe UI", 9)).grid(row=6, column=0, sticky="w", pady=2)
+        ttk.Label(self.content_frame, text="Attachments:", font=("Segoe UI", 9)).grid(row=6, column=0, sticky="w", pady=5)
         self.attachments_var = tk.StringVar()
-        ttk.Entry(self.content_frame, textvariable=self.attachments_var, state="readonly", font=("Segoe UI", 9)).grid(row=6, column=1, sticky="ew", padx=5)
-        self.browse_attach_button = tk.Button(self.content_frame, text="📎", font=("Segoe UI", 9), bg="#e0e0e0" if not self.is_dark_mode else "#333333", fg="#333333" if not self.is_dark_mode else "#ffffff", bd=0, command=self.browse_attachments)
-        self.browse_attach_button.grid(row=6, column=2, padx=5)
-        self.browse_attach_button.bind("<Enter>", lambda e: self.browse_attach_button.config(bg="#d0d0d0" if not self.is_dark_mode else "#444444"))
-        self.browse_attach_button.bind("<Leave>", lambda e: self.browse_attach_button.config(bg="#e0e0e0" if not self.is_dark_mode else "#333333"))
-        Tooltip(self.browse_attach_button, "Add attachments (max 25MB; for videos >20MB, use Google Drive)")
+        ttk.Entry(self.content_frame, textvariable=self.attachments_var, state="readonly", font=("Segoe UI", 9), width=30).grid(row=6, column=1, sticky="ew", padx=10)
+        self.browse_attach_button = tk.Button(self.content_frame, text="Add Attachments", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.browse_attachments)
+        self.browse_attach_button.grid(row=6, column=2, padx=10)
+        self.browse_attach_button.bind("<Enter>", lambda e: self.browse_attach_button.config(bg="#005A9E"))
+        self.browse_attach_button.bind("<Leave>", lambda e: self.browse_attach_button.config(bg="#0078D4"))
+        Tooltip(self.browse_attach_button, "Add attachments (max 25MB; for files >20MB, use Google Drive)")
 
         self.preview_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.preview_tab, text="Preview")
-        self.preview_frame = ttk.Frame(self.preview_tab, padding="5")
+        self.preview_frame = ttk.Frame(self.preview_tab, padding="10")
         self.preview_frame.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(self.preview_frame, text="Email Preview:", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=2)
-        self.preview_text = tk.Text(self.preview_frame, height=8, width=50, font=("Segoe UI", 9), bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff", state="disabled")
-        self.preview_text.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5)
+        ttk.Label(self.preview_frame, text="Email Preview:", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=5)
+        self.preview_text = tk.Text(self.preview_frame, height=8, width=50, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000", state="disabled")
+        self.preview_text.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10)
         self.preview_buttons_frame = ttk.Frame(self.preview_frame)
         self.preview_buttons_frame.grid(row=0, column=1, sticky="e")
-        self.update_preview_button = tk.Button(self.preview_buttons_frame, text="🔄", font=("Segoe UI", 9), bg="#e0e0e0" if not self.is_dark_mode else "#333333", fg="#333333" if not self.is_dark_mode else "#ffffff", bd=0, command=self.update_preview)
-        self.update_preview_button.pack(side=tk.LEFT, padx=5)
-        self.update_preview_button.bind("<Enter>", lambda e: self.update_preview_button.config(bg="#d0d0d0" if not self.is_dark_mode else "#444444"))
-        self.update_preview_button.bind("<Leave>", lambda e: self.update_preview_button.config(bg="#e0e0e0" if not self.is_dark_mode else "#333333"))
+        self.update_preview_button = tk.Button(self.preview_buttons_frame, text="Refresh", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.update_preview)
+        self.update_preview_button.pack(side=tk.LEFT, padx=10)
+        self.update_preview_button.bind("<Enter>", lambda e: self.update_preview_button.config(bg="#005A9E"))
+        self.update_preview_button.bind("<Leave>", lambda e: self.update_preview_button.config(bg="#0078D4"))
         Tooltip(self.update_preview_button, "Refresh preview (Ctrl+P)")
-        self.test_send_button = tk.Button(self.preview_buttons_frame, text="📧", font=("Segoe UI", 9), bg="#e0e0e0" if not self.is_dark_mode else "#333333", fg="#333333" if not self.is_dark_mode else "#ffffff", bd=0, command=self.test_send)
-        self.test_send_button.pack(side=tk.LEFT, padx=5)
-        self.test_send_button.bind("<Enter>", lambda e: self.test_send_button.config(bg="#d0d0d0" if not self.is_dark_mode else "#444444"))
-        self.test_send_button.bind("<Leave>", lambda e: self.test_send_button.config(bg="#e0e0e0" if not self.is_dark_mode else "#333333"))
+        self.test_send_button = tk.Button(self.preview_buttons_frame, text="Test Send", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.test_send)
+        self.test_send_button.pack(side=tk.LEFT, padx=10)
+        self.test_send_button.bind("<Enter>", lambda e: self.test_send_button.config(bg="#005A9E"))
+        self.test_send_button.bind("<Leave>", lambda e: self.test_send_button.config(bg="#0078D4"))
         Tooltip(self.test_send_button, "Send test email to your address")
 
-        self.action_frame = tk.Frame(self.main_frame, bg="#f5f5f5" if not self.is_dark_mode else "#252526")
-        self.action_frame.pack(fill=tk.X, pady=5)
-        self.send_button = tk.Button(self.action_frame, text="📤 Send Emails", font=("Segoe UI", 12), bg="#dc3545", fg="#ffffff", bd=0, command=self.start_sending, width=12, padx=5, pady=3)
-        self.send_button.pack(side=tk.LEFT, padx=10, pady=5)
+        self.action_frame = tk.Frame(self.main_frame, bg="#FFFFFF")
+        self.action_frame.pack(fill=tk.X, pady=10)
+        self.send_button = tk.Button(self.action_frame, text="Send Emails", font=("Segoe UI", 12), bg="#28A745", fg="#FFFFFF", bd=0, command=self.start_sending, width=12)
+        self.send_button.pack(side=tk.LEFT, padx=10)
         self.send_button.bind("<Enter>", lambda e: self.send_button.config(bg="#218838"))
-        self.send_button.bind("<Leave>", lambda e: self.send_button.config(bg="#28a745"))
+        self.send_button.bind("<Leave>", lambda e: self.send_button.config(bg="#28A745"))
         Tooltip(self.send_button, "Send emails to recipients (Ctrl+Enter)")
 
-        self.status_frame = tk.Frame(self.main_frame, bg="#f5f5f5" if not self.is_dark_mode else "#252526")
-        self.status_frame.pack(fill=tk.X, pady=5)
+        self.status_frame = tk.Frame(self.main_frame, bg="#FFFFFF")
+        self.status_frame.pack(fill=tk.X, pady=10)
         self.status_label = ttk.Label(self.status_frame, text="Ready", font=("Segoe UI", 9))
         self.status_label.pack(side=tk.LEFT, padx=10)
         self.progress = ttk.Progressbar(self.status_frame, mode="determinate")
         self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
-        self.log_toggle_button = tk.Button(self.status_frame, text="📜", font=("Segoe UI", 9), bg="#e0e0e0" if not self.is_dark_mode else "#333333", fg="#333333" if not self.is_dark_mode else "#ffffff", bd=0, command=self.toggle_log_viewer)
+        self.log_toggle_button = tk.Button(self.status_frame, text="View Logs", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.toggle_log_viewer)
         self.log_toggle_button.pack(side=tk.RIGHT, padx=10)
-        self.log_toggle_button.bind("<Enter>", lambda e: self.log_toggle_button.config(bg="#d0d0d0" if not self.is_dark_mode else "#444444"))
-        self.log_toggle_button.bind("<Leave>", lambda e: self.log_toggle_button.config(bg="#e0e0e0" if not self.is_dark_mode else "#333333"))
+        self.log_toggle_button.bind("<Enter>", lambda e: self.log_toggle_button.config(bg="#005A9E"))
+        self.log_toggle_button.bind("<Leave>", lambda e: self.log_toggle_button.config(bg="#0078D4"))
         Tooltip(self.log_toggle_button, "Show/hide log viewer")
-        self.log_frame = tk.Frame(self.main_frame, bg="#f5f5f5" if not self.is_dark_mode else "#252526")
-        self.log_text = tk.Text(self.log_frame, height=5, font=("Segoe UI", 9), bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff", state="disabled")
+        self.log_frame = tk.Frame(self.main_frame, bg="#FFFFFF")
+        self.log_text = tk.Text(self.log_frame, height=5, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000", state="disabled")
         self.log_text.pack(fill=tk.X, padx=10, pady=5)
-        self.log_key_var = tk.StringVar(value=self.config.get("fernet_key", ""))
-        ttk.Entry(self.log_frame, textvariable=self.log_key_var, font=("Segoe UI", 9), show="*").pack(fill=tk.X, padx=10, pady=5)
-        Tooltip(self.log_frame, "Enter Fernet key to decrypt logs")
+        self.reset_log_button = tk.Button(self.log_frame, text="Reset Logs", font=("Segoe UI", 9), bg="#D32F2F", fg="#FFFFFF", bd=0, command=self.reset_fernet_key)
+        self.reset_log_button.pack(pady=5)
+        self.reset_log_button.bind("<Enter>", lambda e: self.reset_log_button.config(bg="#B71C1C"))
+        self.reset_log_button.bind("<Leave>", lambda e: self.reset_log_button.config(bg="#D32F2F"))
+        Tooltip(self.reset_log_button, "Reset encryption key and clear logs")
         self.log_visible = False
 
-        self.notification_frame = tk.Frame(self.main_frame, bg="#f5f5f5" if not self.is_dark_mode else "#252526")
-        self.notification_frame.pack(fill=tk.X, pady=5)
-        self.notification_label = ttk.Label(self.notification_frame, text="", font=("Segoe UI", 9), background="#ffebee", foreground="#d32f2f")
+        self.notification_frame = tk.Frame(self.main_frame, bg="#FFFFFF", relief="solid", borderwidth=1)
+        self.notification_frame.pack(fill=tk.X, pady=10)
+        self.notification_label = ttk.Label(self.notification_frame, text="", font=("Segoe UI", 9), background="#FFEBEE", foreground="#D32F2F")
         self.notification_label.pack(fill=tk.X, padx=10, pady=5)
         self.notification_label.bind("<Button-1>", self.handle_notification_click)
 
-    def init_cipher(self):
-        fernet_key = self.config.get("fernet_key")
-        if not fernet_key:
-            fernet_key = Fernet.generate_key().decode()
-            self.config["fernet_key"] = fernet_key
-        return Fernet(fernet_key.encode())
-
     def configure_styles(self):
-        light_styles = {
-            "TLabel": {"background": "#f5f5f5", "foreground": "#333333", "font": ("Segoe UI", 9), "padding": 2},
-            "TEntry": {"fieldbackground": "#ffffff", "foreground": "#333333", "font": ("Segoe UI", 9), "borderwidth": 1, "relief": "flat"},
-            "TCombobox": {"fieldbackground": "#ffffff", "foreground": "#333333", "font": ("Segoe UI", 9), "borderwidth": 1},
-            "TNotebook": {"background": "#f5f5f5", "padding": 2},
-            "TNotebook.Tab": {"background": "#e0e0e0", "foreground": "#333333", "font": ("Segoe UI Semibold", 9), "padding": [8, 3]},
-            "TProgressbar": {"background": "#0078d4", "troughcolor": "#e0e0e0"}
+        styles = {
+            "TLabel": {"background": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI", 9), "padding": 5},
+            "TEntry": {"fieldbackground": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI", 9), "borderwidth": 1, "relief": "flat"},
+            "TCombobox": {"fieldbackground": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI", 9), "borderwidth": 1},
+            "TNotebook": {"background": "#FFFFFF", "padding": 5},
+            "TNotebook.Tab": {"background": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI Semibold", 9), "padding": [10, 5]},
+            "TProgressbar": {"background": "#0078D4", "troughcolor": "#FFFFFF"}
         }
-        dark_styles = {
-            "TLabel": {"background": "#252526", "foreground": "#ffffff", "font": ("Segoe UI", 9), "padding": 2},
-            "TEntry": {"fieldbackground": "#1e1e1e", "foreground": "#ffffff", "font": ("Segoe UI", 9), "borderwidth": 1, "relief": "flat"},
-            "TCombobox": {"fieldbackground": "#1e1e1e", "foreground": "#ffffff", "font": ("Segoe UI", 9), "borderwidth": 1},
-            "TNotebook": {"background": "#252526", "padding": 2},
-            "TNotebook.Tab": {"background": "#333333", "foreground": "#ffffff", "font": ("Segoe UI Semibold", 9), "padding": [8, 3]},
-            "TProgressbar": {"background": "#0078d4", "troughcolor": "#333333"}
-        }
-        styles = dark_styles if self.is_dark_mode else light_styles
         for widget, config in styles.items():
             self.style.configure(widget, **config)
-        self.style.map("TNotebook.Tab", background=[("selected", "#ffffff" if not self.is_dark_mode else "#1e1e1e"), ("active", "#d0d0d0" if not self.is_dark_mode else "#444444")])
+        self.style.map("TNotebook.Tab", background=[("selected", "#0078D4"), ("active", "#F0F0F0")], foreground=[("selected", "#FFFFFF")])
 
-    def toggle_theme(self):
-        self.is_dark_mode = not self.is_dark_mode
-        self.config["theme"] = "dark" if self.is_dark_mode else "light"
-        self.save_config()
-        self.configure_styles()
-        bg = "#f5f5f5" if not self.is_dark_mode else "#252526"
-        self.root.configure(bg=bg)
-        self.main_frame.configure(bg=bg)
-        self.action_frame.configure(bg=bg)
-        self.status_frame.configure(bg=bg)
-        self.notification_frame.configure(bg=bg)
-        self.sidebar.configure(bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e")
-        self.theme_button.config(text="☀️" if self.is_dark_mode else "🌙")
-        for frame in [self.smtp_frame, self.content_frame, self.preview_frame]:
-            for child in frame.winfo_children():
-                if isinstance(child, (ttk.Label, ttk.Entry, ttk.Combobox)):
-                    child.configure(style=child.winfo_class())
-        for button in [self.save_keyring_button, self.load_csv_button, self.browse_attach_button, self.update_preview_button, self.test_send_button, self.log_toggle_button]:
-            button.configure(bg="#e0e0e0" if not self.is_dark_mode else "#333333", fg="#333333" if not self.is_dark_mode else "#ffffff")
-        self.send_button.configure(bg="#28a745", fg="#ffffff")
-        self.targets_text.configure(bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff")
-        self.message_text.configure(bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff")
-        self.preview_text.configure(bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff")
-        self.log_text.configure(bg="#f5f5f5" if not self.is_dark_mode else "#1e1e1e", fg="#333333" if not self.is_dark_mode else "#ffffff")
-        self.log_frame.configure(bg="#f5f5f5" if not self.is_dark_mode else "#252526")
+    def update_subject_char_count(self, *args):
+        length = len(self.subject_var.get())
+        self.subject_char_count.config(text=f"{length}/78")
+        if length > 78:
+            self.subject_char_count.config(foreground="#D32F2F")
+        else:
+            self.subject_char_count.config(foreground="#000000")
+
+    def init_cipher(self):
+        fernet_key = keyring.get_password("ShurikenMail", "fernet_key")
+        if not fernet_key:
+            fernet_key = Fernet.generate_key().decode()
+            keyring.set_password("ShurikenMail", "fernet_key", fernet_key)
+        try:
+            return Fernet(fernet_key.encode())
+        except Exception as e:
+            logging.error(f"Invalid Fernet key: {e}")
+            raise ValueError("Invalid Fernet key in keyring")
+
+    def reset_fernet_key(self):
+        if messagebox.askokcancel("Confirm", "Resetting logs will clear all encrypted logs and generate a new encryption key. Continue?"):
+            try:
+                keyring.delete_password("ShurikenMail", "fernet_key")
+                for file in [log_file] + [f"{log_file}.{i}" for i in range(1, 6)]:
+                    if os.path.exists(file):
+                        os.remove(file)
+                self.cipher = self.init_cipher()
+                logger.handlers = [h for h in logger.handlers if not isinstance(h, EncryptedFileHandler)]
+                logger.addHandler(EncryptedFileHandler(log_file, self.cipher, maxBytes=1048576, backupCount=5))
+                self.show_notification("Logs and encryption key reset successfully")
+                audit_logger.info("Logs and Fernet key reset")
+                self.update_log_viewer()
+            except Exception as e:
+                self.show_notification(f"Failed to reset logs: {e}")
+                logging.error(f"Failed to reset logs: {e}")
+                audit_logger.info(f"Failed to reset logs: {e}")
 
     def toggle_log_viewer(self):
         if self.log_visible:
             self.log_frame.pack_forget()
             self.log_visible = False
         else:
-            self.log_frame.pack(fill=tk.X, pady=5)
+            self.log_frame.pack(fill=tk.X, pady=10)
             self.log_visible = True
             self.update_log_viewer()
 
     def update_log_viewer(self):
         self.log_text.config(state="normal")
         self.log_text.delete("1.0", tk.END)
-        key = self.log_key_var.get()
+        key = keyring.get_password("ShurikenMail", "fernet_key")
         if not key:
-            self.log_text.insert(tk.END, f"Enter Fernet key (check {self.config_file})")
+            self.log_text.insert(tk.END, "Fernet key not found in keyring. Click 'Reset Logs' to generate a new key.")
+            self.show_notification("Fernet key missing. Click 'Reset Logs' to fix.", action=self.reset_fernet_key)
             self.log_text.config(state="disabled")
             return
         try:
             fernet = Fernet(key.encode())
+            if not os.path.exists(log_file) or os.path.getsize(log_file) == 0:
+                self.log_text.insert(tk.END, "No logs available. Send emails to generate logs.")
+                self.log_text.config(state="disabled")
+                return
             with open(log_file, "rb") as f:
                 for line in f:
                     try:
                         decrypted = fernet.decrypt(line.strip()).decode()
                         self.log_text.insert(tk.END, decrypted + "\n")
-                    except:
-                        self.log_text.insert(tk.END, "[Decryption Failed]\n")
+                    except Exception:
+                        self.log_text.insert(tk.END, "Malformed log detected, not processing this one\n")
         except Exception as e:
-            self.log_text.insert(tk.END, f"Error loading logs: {e}")
+            self.log_text.insert(tk.END, f"Error loading logs: {e}\nClick 'Reset Logs' to clear and regenerate.")
+            self.show_notification(f"Log decryption failed: {e}. Click 'Reset Logs' to fix.", action=self.reset_fernet_key)
         self.log_text.config(state="disabled")
 
     def show_notification(self, message, action=None):
@@ -376,7 +455,7 @@ class ShurikenMail:
             self.notification_frame.pack_forget()
             return
         message, action = self.notification_queue[0]
-        self.notification_frame.pack(fill=tk.X, pady=5)
+        self.notification_frame.pack(fill=tk.X, pady=10)
         self.notification_label.config(text=message)
         self.notification_action = action
         self.root.after(5000, self.clear_notification)
@@ -412,8 +491,7 @@ class ShurikenMail:
         self.consent_label.config(text="✔" if self.consent_var.get() else "☐")
 
     def clear_placeholder(self, event):
-        if self.targets_text.get("1.0", tk.END).strip() == "Enter emails, one per line, or load a CSV":
-            self.targets_text.delete("1.0", tk.END)
+        self.targets_text.delete("1.0", tk.END)
 
     def set_placeholder(self, event):
         if not self.targets_text.get("1.0", tk.END).strip():
@@ -430,8 +508,6 @@ class ShurikenMail:
 
     def save_config(self):
         config = {
-            "theme": "dark" if self.is_dark_mode else "light",
-            "fernet_key": self.config.get("fernet_key", ""),
             "smtp_server": self.smtp_var.get() if hasattr(self, "smtp_var") else "",
             "smtp_port": self.port_var.get() if hasattr(self, "port_var") else "",
             "email": self.email_var.get() if hasattr(self, "email_var") else ""
@@ -439,7 +515,9 @@ class ShurikenMail:
         try:
             with open(self.config_file, "w") as f:
                 json.dump(config, f, indent=4)
+            os.chmod(self.config_file, 0o600)
             self.show_notification("Configuration saved")
+            audit_logger.info("Configuration saved")
         except Exception as e:
             logging.error(f"Failed to save config: {e}")
             self.show_notification(f"Failed to save config: {e}")
@@ -449,10 +527,12 @@ class ShurikenMail:
             try:
                 keyring.set_password("ShurikenMail", self.email_var.get(), self.pass_var.get())
                 self.show_notification("Password saved securely")
-                self.pass_var.set("")
+                audit_logger.info("Password saved to keyring")
             except Exception as e:
                 logging.error(f"Failed to save password: {e}")
                 self.show_notification(f"Failed to save password: {e}")
+            finally:
+                self.pass_var.set("")  # Clear password
         else:
             self.show_notification("Email and password required")
 
@@ -464,6 +544,18 @@ class ShurikenMail:
             logging.error(f"Failed to retrieve password: {e}")
             return self.pass_var.get()
 
+    def is_valid_email(self, email):
+        pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+        if not re.match(pattern, email):
+            return False
+        try:
+            domain = email.split('@')[1]
+            import socket
+            socket.gethostbyname(domain)
+            return True
+        except:
+            return False
+
     def load_csv(self):
         file = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
         if file:
@@ -471,21 +563,26 @@ class ShurikenMail:
             try:
                 with open(file, "r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
-                    self.recipients = list(reader)
-                    emails = [row["email"] for row in self.recipients if "email" in row and self.is_valid_email(row["email"])]
+                    self.recipients = []
+                    for row in reader:
+                        sanitized_row = {k: v.strip() for k, v in row.items()}
+                        if "email" in sanitized_row:
+                            if sanitized_row["email"].startswith(('=', '+', '-', '@')):
+                                sanitized_row["email"] = f"'{sanitized_row['email']}"
+                            if self.is_valid_email(sanitized_row["email"]):
+                                self.recipients.append(sanitized_row)
+                    emails = [row["email"] for row in self.recipients]
                     if not emails:
                         self.show_notification("No valid emails found in CSV")
                         return
                     self.targets_text.delete("1.0", tk.END)
                     self.targets_text.insert(tk.END, "\n".join(emails))
                     self.show_notification(f"Loaded {len(emails)} valid recipients from CSV")
+                    audit_logger.info(f"Loaded CSV with {len(emails)} recipients")
             except Exception as e:
                 logging.error(f"Failed to load CSV: {e}")
                 self.show_notification(f"Failed to load CSV: {e}")
         self.status_label.config(text="Ready")
-
-    def is_valid_email(self, email):
-        return bool(re.match(r"[^@]+@[^@]+\.[^@]+", email))
 
     def toggle_custom_count(self, *args):
         if self.count_var.get() == "Custom":
@@ -495,12 +592,33 @@ class ShurikenMail:
             self.custom_count_var.set("")
 
     def browse_attachments(self):
-        files = filedialog.askopenfilenames(filetypes=[("All files", "*.*"), ("Video files", "*.mp4 *.mov *.avi")])
+        allowed_types = {
+            '.pdf': b'%PDF-',
+            '.png': b'\x89PNG\r\n\x1a\n',
+            '.jpg': b'\xff\xd8\xff',
+            '.mp4': b'\x00\x00\x00\x20ftypmp42'
+        }
+        files = filedialog.askopenfilenames(filetypes=[("Safe files", "*.pdf *.png *.jpg *.mp4")])
+        valid_files = []
         for file in files:
-            if os.path.getsize(file) > 20 * 1024 * 1024:  # Warn for >20MB
-                messagebox.showwarning("Large File", f"File {file} is over 20MB. Consider compressing or using a Google Drive link.")
-        self.attachments_var.set(", ".join(files))
-        self.show_notification(f"Added {len(files)} attachments")
+            if os.path.getsize(file) > 25 * 1024 * 1024:
+                messagebox.showwarning("Large File", f"File {file} exceeds 25MB.")
+                continue
+            if os.path.getsize(file) > 20 * 1024 * 1024:
+                messagebox.showwarning("Large File", f"File {file} is over 20MB. Consider using a Google Drive link.")
+            ext = os.path.splitext(file)[1].lower()
+            if ext in allowed_types:
+                with open(file, 'rb') as f:
+                    header = f.read(8)
+                    if header.startswith(allowed_types[ext]):
+                        valid_files.append(file)
+                    else:
+                        messagebox.showwarning("Invalid File", f"File {file} has invalid content.")
+            else:
+                messagebox.showwarning("Unsupported File", f"File type {ext} not allowed.")
+        self.attachments_var.set(", ".join(valid_files))
+        self.show_notification(f"Added {len(valid_files)} attachments")
+        audit_logger.info(f"Added {len(valid_files)} attachments")
 
     def check_spam_triggers(self, text):
         spam_words = ["free", "win", "urgent", "buy now", "guarantee", "click here", "limited offer"]
@@ -511,7 +629,7 @@ class ShurikenMail:
 
     def validate_inputs(self):
         if not self.consent_var.get():
-            return False, "You must confirm ethical use."
+            return False, "You must confirm authorized use."
         if not self.smtp_var.get() or not self.port_var.get():
             return False, "SMTP server and port are required."
         if not self.email_var.get() or not self.get_password():
@@ -526,17 +644,25 @@ class ShurikenMail:
             count = int(self.custom_count_var.get()) if self.count_var.get() == "Custom" else int(self.count_var.get())
             if count < 1 or count > 100:
                 return False, "Email count must be between 1 and 100."
+            if len(targets) * count > 100:
+                return False, "Total emails exceed recommended daily limit (100). Split into smaller batches."
         except ValueError:
             return False, "Invalid email count."
-        if not self.subject_var.get() or not self.message_text.get("1.0", tk.END).strip():
+        subject = self.subject_var.get()
+        message = self.message_text.get("1.0", tk.END).strip()
+        if not subject or not message:
             return False, "Subject and message are required."
+        if re.search(r'[\r\n]', subject):
+            return False, "Subject cannot contain newline characters."
+        if len(subject) > 78:
+            return False, "Subject exceeds 78 characters."
         attachments = [a.strip() for a in self.attachments_var.get().split(",") if a.strip()]
         for file in attachments:
             if not os.path.exists(file):
                 return False, f"Attachment not found: {file}"
             if os.path.getsize(file) > 25 * 1024 * 1024:
                 return False, f"File {file} exceeds 25MB limit. Use a Google Drive link instead."
-        spam_detected, spam_score = self.check_spam_triggers(self.subject_var.get() + " " + self.message_text.get("1.0", tk.END))
+        spam_detected, spam_score = self.check_spam_triggers(subject + " " + message)
         if spam_detected:
             return False, f"Content likely to be flagged as spam (score: {spam_score}). Revise subject/message."
         return True, ""
@@ -559,13 +685,14 @@ class ShurikenMail:
         parser.feed(html_message)
         self.preview_text.config(state="disabled")
         self.show_notification("Preview updated (Ctrl+P)")
+        audit_logger.info("Preview updated")
 
     def create_smtp_connection(self):
         smtp_server = self.smtp_var.get()
         port = int(self.port_var.get())
         email = self.email_var.get()
         password = self.get_password()
-        timeout = 60  # Increased for video attachments
+        timeout = 120
 
         for attempt in range(3):
             try:
@@ -575,8 +702,9 @@ class ShurikenMail:
                     server = smtplib.SMTP(smtp_server, port, timeout=timeout)
                     server.starttls()
                 server.login(email, password)
-                server.ehlo()  # Keep-alive
+                server.ehlo()
                 logging.info(f"SMTP connection established to {smtp_server}:{port}")
+                audit_logger.info(f"SMTP connection established to {smtp_server}:{port}")
                 return server
             except Exception as e:
                 logging.warning(f"SMTP connection attempt {attempt+1} failed: {e}")
@@ -592,8 +720,8 @@ class ShurikenMail:
         msg["Subject"] = subject
 
         html_message = f"<html><body>{message.replace('\n', '<br>')}</body></html>"
-        msg.attach(MIMEText(message, "plain"))
-        msg.attach(MIMEText(html_message, "html"))
+        msg.attach(MIMEText(message, "plain", "utf-8"))
+        msg.attach(MIMEText(html_message, "html", "utf-8"))
 
         for file in attachments:
             with open(file, "rb") as f:
@@ -604,8 +732,8 @@ class ShurikenMail:
             msg.attach(part)
 
         server.send_message(msg)
-        server.noop()  # Keep-alive
-        logging.info(f"Sent email to {to_email}")
+        server.noop()
+        logging.info("Sent email to recipient")
 
     def test_send(self):
         valid, error = self.validate_inputs()
@@ -613,7 +741,8 @@ class ShurikenMail:
             self.show_notification(error)
             return
         self.status_label.config(text="Sending test email...")
-        logging.info(f"Attempting test send to {self.email_var.get()}")
+        logging.info("Attempting test send to sender")
+        audit_logger.info("Initiated test send")
         server = None
         try:
             server = self.create_smtp_connection()
@@ -624,22 +753,25 @@ class ShurikenMail:
             attachments = [a.strip() for a in self.attachments_var.get().split(",") if a.strip()]
             self.send_email(server, target, subject, message, attachments)
             self.show_notification("Test email sent to your address")
-            logging.info(f"Test email sent to {self.email_var.get()}")
+            logging.info("Test email sent to sender")
+            audit_logger.info("Test email sent successfully")
         except Exception as e:
             error_msg = {
                 "SMTPAuthenticationError": "Authentication failed. Check email/password or use App Password.",
                 "SMTPConnectError": "Failed to connect to SMTP server. Check server/port or try port 465.",
                 "SMTPServerDisconnected": "Server disconnected. Try again later or check network.",
-                "SMTPRecipientsRefused": f"Recipient {self.email_var.get()} refused.",
+                "SMTPRecipientsRefused": "Recipient refused.",
                 "SMTPDataError": "Server rejected email content. Check subject/message or attachments."
             }.get(type(e).__name__, f"Test send failed: {str(e)}")
             self.show_notification(error_msg, action=self.test_send)
             logging.error(f"Test send failed: {error_msg}")
+            audit_logger.info(f"Test send failed: {error_msg}")
         finally:
             if server:
                 try:
                     server.quit()
                     logging.info("SMTP connection closed")
+                    audit_logger.info("SMTP connection closed")
                 except:
                     pass
             self.status_label.config(text="Ready")
@@ -649,11 +781,14 @@ class ShurikenMail:
         if not valid:
             self.show_notification(error)
             return
+        if not messagebox.askokcancel("Confirm", "Are you sure you want to send emails?"):
+            return
         self.save_config()
         self.send_button.config(state="disabled")
         self.status_label.config(text="Sending emails...")
         self.progress["value"] = 0
         Thread(target=self.send_emails, daemon=True).start()
+        audit_logger.info("Started email sending process")
 
     def send_emails(self):
         server = None
@@ -664,49 +799,58 @@ class ShurikenMail:
             message_template = self.message_text.get("1.0", tk.END).strip()
             subject_template = self.subject_var.get()
 
+            rate_limit = 10  # Emails per minute
+            rate_interval = 60 / rate_limit
             total_emails = len(targets) * count
             self.progress["maximum"] = total_emails
             sent_emails = 0
             failed_emails = []
 
             server = self.create_smtp_connection()
+            last_send_time = time.time()
 
             for target in targets:
                 recipient_data = next((r for r in getattr(self, "recipients", []) if r.get("email") == target), {"name": target.split("@")[0]})
                 for i in range(count):
+                    current_time = time.time()
+                    if current_time - last_send_time < rate_interval:
+                        time.sleep(rate_interval - (current_time - last_send_time))
                     retries = 0
                     max_retries = 3
                     while retries <= max_retries:
                         try:
                             subject = subject_template.format(**recipient_data, sender=self.email_var.get())
                             message = message_template.format(**recipient_data, sender=self.email_var.get())
-                            logging.info(f"Attempting to send email {i+1}/{count} to {target}")
+                            logging.info(f"Attempting to send email {i+1}/{count} to recipient")
                             self.send_email(server, target, subject, message, attachments)
                             sent_emails += 1
                             self.progress["value"] = sent_emails
                             self.status_label.config(text=f"Sent {sent_emails}/{total_emails} emails")
                             self.root.update()
-                            logging.info(f"Sent email {i+1}/{count} to {target}")
-                            time.sleep(random.uniform(1, 3))
+                            logging.info(f"Sent email {i+1}/{count} to recipient")
+                            audit_logger.info(f"Sent email {i+1}/{count} to recipient")
+                            last_send_time = time.time()
                             break
                         except Exception as e:
                             retries += 1
                             error_msg = {
-                                "SMTPRecipientsRefused": f"Recipient {target} refused.",
+                                "SMTPRecipientsRefused": "Recipient refused.",
                                 "SMTPDataError": "Server rejected email content. Check subject/message or attachments.",
                                 "SMTPServerDisconnected": "Server disconnected. Reconnecting..."
-                            }.get(type(e).__name__, f"Error sending to {target}: {str(e)}")
-                            logging.warning(f"Retry {retries}/{max_retries} for {target}: {error_msg}")
+                            }.get(type(e).__name__, f"Error sending to recipient: {str(e)}")
+                            logging.warning(f"Retry {retries}/{max_retries} for recipient: {error_msg}")
                             if retries > max_retries:
                                 failed_emails.append((target, error_msg))
-                                logging.error(f"Failed to send email {i+1}/{count} to {target}: {error_msg}")
+                                logging.error(f"Failed to send email {i+1}/{count} to recipient: {error_msg}")
+                                audit_logger.info(f"Failed to send email {i+1}/{count}: {error_msg}")
                                 break
                             time.sleep(2 ** retries)
                             if "disconnected" in error_msg.lower():
                                 try:
                                     server.quit()
                                     server = self.create_smtp_connection()
-                                    logging.info(f"Reconnected to SMTP server")
+                                    logging.info("Reconnected to SMTP server")
+                                    audit_logger.info("Reconnected to SMTP server")
                                 except Exception as e:
                                     logging.warning(f"Reconnection failed: {e}")
                                     failed_emails.append((target, f"Reconnection failed: {str(e)}"))
@@ -718,6 +862,7 @@ class ShurikenMail:
             else:
                 self.show_notification("Emails sent successfully!")
             logging.info(f"Email sending completed: {sent_emails}/{total_emails} sent, {len(failed_emails)} failed")
+            audit_logger.info(f"Email sending completed: {sent_emails}/{total_emails} sent, {len(failed_emails)} failed")
         except Exception as e:
             error_msg = {
                 "SMTPAuthenticationError": "Authentication failed. Check email/password or use App Password.",
@@ -726,11 +871,13 @@ class ShurikenMail:
             }.get(type(e).__name__, f"Failed to send emails: {e}")
             self.show_notification(error_msg, action=self.start_sending)
             logging.error(f"Error: {error_msg}")
+            audit_logger.info(f"Email sending failed: {error_msg}")
         finally:
             if server:
                 try:
                     server.quit()
                     logging.info("SMTP connection closed")
+                    audit_logger.info("SMTP connection closed")
                 except:
                     pass
             self.send_button.config(state="normal")

@@ -1,6 +1,4 @@
 {
-    "theme": "light",
-    "fernet_key": "r5pJ0EZJXjiEkkyYK0xFPGdqk8oyTa2ZAyKr05ledxs=",
     "smtp_server": "smtp.gmail.com",
     "smtp_port": "587",
     "email": ""
