@@ -17,7 +17,6 @@ from html.parser import HTMLParser
 from email.mime.base import MIMEBase
 from email import encoders
 
-# Configure encrypted logging
 log_file = "shurikenmail_log.enc"
 audit_log_file = "shurikenmail_audit.log"
 class SanitizeFilter(logging.Filter):
@@ -52,7 +51,6 @@ logging.basicConfig(
 logger = logging.getLogger()
 logger.addFilter(SanitizeFilter())
 
-# Audit logging
 audit_logger = logging.getLogger('audit')
 audit_handler = logging.handlers.RotatingFileHandler(audit_log_file, maxBytes=1048576, backupCount=5)
 audit_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
@@ -81,7 +79,7 @@ class Tooltip:
         self.tooltip_window = tk.Toplevel(self.widget)
         self.tooltip_window.wm_overrideredirect(True)
         self.tooltip_window.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(self.tooltip_window, text=self.text, background="#FFFFFF", foreground="#000000",
+        label = tk.Label(self.tooltip_window, text=self.text, background="#2E2E2E", foreground="#FFFFFF",
                          relief="solid", borderwidth=1, font=("Segoe UI", 8), wraplength=150, padx=5, pady=3)
         label.pack()
         self.fade_in()
@@ -121,10 +119,10 @@ class HTMLPreviewParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         self.current_tag = tag
         if tag == "b":
-            self.text_widget.tag_configure("bold", font=("Segoe UI", 9, "bold"))
+            self.text_widget.tag_configure("bold", font=("Segoe UI", 9, "bold"), foreground="#FFFFFF")
             self.text_widget.insert(tk.END, "", "bold")
         elif tag == "i":
-            self.text_widget.tag_configure("italic", font=("Segoe UI", 9, "italic"))
+            self.text_widget.tag_configure("italic", font=("Segoe UI", 9, "italic"), foreground="#FFFFFF")
             self.text_widget.insert(tk.END, "", "italic")
 
     def handle_endtag(self, tag):
@@ -144,7 +142,6 @@ class ShurikenMail:
         self.load_config()
         self.notification_queue = []
 
-        # Initialize cipher and logging
         try:
             self.cipher = self.init_cipher()
             logger.addHandler(EncryptedFileHandler(log_file, self.cipher, maxBytes=1048576, backupCount=5))
@@ -152,12 +149,10 @@ class ShurikenMail:
             messagebox.showerror("Error", f"Failed to initialize encryption: {e}")
             raise
 
-        # PIN authentication
         if not self.authenticate_user():
             self.root.destroy()
             return
 
-        # Ethical use disclaimer
         messagebox.showwarning(
             "Use it at your own risk",
             "ShurikenMail is for authorized phishing tests only. Use without permission is illegal and unethical."
@@ -174,7 +169,7 @@ class ShurikenMail:
     def authenticate_user(self):
         pin = keyring.get_password("ShurikenMail", "app_pin")
         if not pin:
-            pin = "1234"  # Default PIN
+            pin = "1234"
             keyring.set_password("ShurikenMail", "app_pin", pin)
         dialog = tk.Toplevel(self.root)
         dialog.title("Authentication")
@@ -200,44 +195,39 @@ class ShurikenMail:
         self.style = ttk.Style()
         self.style.theme_use("clam")
         self.configure_styles()
-
-        self.root.configure(bg="#FFFFFF")
+        self.root.configure(bg="#2E2E2E")
         self.root.bind("<Control-s>", lambda e: self.save_config())
         self.root.bind("<Control-p>", lambda e: self.update_preview())
         self.root.bind("<Control-Return>", lambda e: self.start_sending())
-
-        self.toolbar = tk.Frame(self.root, bg="#0078D4", height=30)
+        self.toolbar = tk.Frame(self.root, bg="#2E2E2E", height=30)
         self.toolbar.pack(fill=tk.X)
-        self.logo_label = tk.Label(self.toolbar, text="ShurikenMail", font=("Segoe UI Semibold", 12), fg="#FFFFFF", bg="#0078D4")
+        self.logo_label = tk.Label(self.toolbar, text="ShurikenMail", font=("Segoe UI Semibold", 12), fg="#FFFFFF", bg="#2E2E2E")
         self.logo_label.pack(side=tk.LEFT, padx=10)
-        self.save_config_button = tk.Button(self.toolbar, text="Save", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.save_config)
+        self.save_config_button = tk.Button(self.toolbar, text="Save", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.save_config)
         self.save_config_button.pack(side=tk.LEFT, padx=10)
         Tooltip(self.save_config_button, "Save configuration (Ctrl+S)")
-        self.clear_form_button = tk.Button(self.toolbar, text="Clear", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.clear_form)
+        self.clear_form_button = tk.Button(self.toolbar, text="Clear", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.clear_form)
         self.clear_form_button.pack(side=tk.LEFT, padx=10)
         Tooltip(self.clear_form_button, "Clear form")
         for btn in [self.save_config_button, self.clear_form_button]:
-            btn.bind("<Enter>", lambda e, b=btn: b.config(bg="#005A9E"))
-            btn.bind("<Leave>", lambda e, b=btn: b.config(bg="#0078D4"))
-
-        self.sidebar = tk.Frame(self.root, bg="#FFFFFF", width=50)
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg="#3C3C3C"))
+            btn.bind("<Leave>", lambda e, b=btn: b.config(bg="#2E2E2E"))
+        self.sidebar = tk.Frame(self.root, bg="#2E2E2E", width=50)
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
         self.consent_var = tk.BooleanVar()
-        self.consent_frame = tk.Frame(self.sidebar, bg="#FFFFFF")
+        self.consent_frame = tk.Frame(self.sidebar, bg="#2E2E2E")
         self.consent_frame.pack(pady=10)
         self.consent_label = ttk.Label(self.consent_frame, text="✔" if self.consent_var.get() else "☐", font=("Segoe UI", 10))
         self.consent_label.pack(side=tk.LEFT)
-        ttk.Label(self.consent_frame, text="Authorized Use", font=("Segoe UI", 9), foreground="#D32F2F").pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.consent_frame, text="Authorized Use", font=("Segoe UI", 9), foreground="#FFFFFF").pack(side=tk.LEFT, padx=5)
         self.consent_label.bind("<Button-1>", self.toggle_consent)
-        self.consent_label.bind("<Enter>", lambda e: self.consent_label.config(background="#F0F0F0"))
-        self.consent_label.bind("<Leave>", lambda e: self.consent_label.config(background="#FFFFFF"))
+        self.consent_label.bind("<Enter>", lambda e: self.consent_label.config(background="#3C3C3C"))
+        self.consent_label.bind("<Leave>", lambda e: self.consent_label.config(background="#2E2E2E"))
         Tooltip(self.consent_label, "Confirm authorized use only\nRequired to send emails")
-
-        self.main_frame = tk.Frame(self.root, bg="#FFFFFF")
+        self.main_frame = tk.Frame(self.root, bg="#2E2E2E")
         self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.notebook = ttk.Notebook(self.main_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
-
         self.smtp_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.smtp_tab, text="SMTP Settings")
         self.smtp_frame = ttk.Frame(self.smtp_tab, padding="10")
@@ -254,26 +244,25 @@ class ShurikenMail:
         ttk.Label(self.smtp_frame, text="Password/App Key:", font=("Segoe UI", 9)).grid(row=3, column=0, sticky="w", pady=5)
         self.pass_var = tk.StringVar()
         ttk.Entry(self.smtp_frame, textvariable=self.pass_var, show="*", font=("Segoe UI", 9), width=30).grid(row=3, column=1, sticky="ew", padx=10)
-        self.save_keyring_button = tk.Button(self.smtp_frame, text="Save Password", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.save_password)
+        self.save_keyring_button = tk.Button(self.smtp_frame, text="Save password", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.save_password)
         self.save_keyring_button.grid(row=3, column=2, padx=10)
-        self.save_keyring_button.bind("<Enter>", lambda e: self.save_keyring_button.config(bg="#005A9E"))
-        self.save_keyring_button.bind("<Leave>", lambda e: self.save_keyring_button.config(bg="#0078D4"))
+        self.save_keyring_button.bind("<Enter>", lambda e: self.save_keyring_button.config(bg="#3C3C3C"))
+        self.save_keyring_button.bind("<Leave>", lambda e: self.save_keyring_button.config(bg="#2E2E2E"))
         Tooltip(self.save_keyring_button, "Save password securely")
-
         self.content_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.content_tab, text="Email Content")
         self.content_frame = ttk.Frame(self.content_tab, padding="10")
         self.content_frame.pack(fill=tk.BOTH, expand=True)
         ttk.Label(self.content_frame, text="Recipient Emails:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=5)
-        self.targets_text = tk.Text(self.content_frame, height=4, width=50, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000")
+        self.targets_text = tk.Text(self.content_frame, height=4, width=50, font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF")
         self.targets_text.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10)
         self.targets_text.insert(tk.END, "Enter emails, one per line, or load a CSV")
         self.targets_text.bind("<FocusIn>", self.clear_placeholder)
         self.targets_text.bind("<FocusOut>", self.set_placeholder)
-        self.load_csv_button = tk.Button(self.content_frame, text="Load CSV", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.load_csv)
+        self.load_csv_button = tk.Button(self.content_frame, text="Load CSV", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.load_csv)
         self.load_csv_button.grid(row=1, column=2, padx=10)
-        self.load_csv_button.bind("<Enter>", lambda e: self.load_csv_button.config(bg="#005A9E"))
-        self.load_csv_button.bind("<Leave>", lambda e: self.load_csv_button.config(bg="#0078D4"))
+        self.load_csv_button.bind("<Enter>", lambda e: self.load_csv_button.config(bg="#3C3C3C"))
+        self.load_csv_button.bind("<Leave>", lambda e: self.load_csv_button.config(bg="#2E2E2E"))
         Tooltip(self.load_csv_button, "Load recipient list from CSV")
         ttk.Label(self.content_frame, text="Emails per Recipient:", font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=5)
         self.count_var = tk.StringVar(value="1")
@@ -291,93 +280,89 @@ class ShurikenMail:
         self.subject_char_count.grid(row=4, column=2, sticky="w", padx=5)
         self.subject_var.trace("w", self.update_subject_char_count)
         ttk.Label(self.content_frame, text="Message:", font=("Segoe UI", 9)).grid(row=5, column=0, sticky="w", pady=5)
-        self.message_text = tk.Text(self.content_frame, height=5, width=50, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000")
+        self.message_text = tk.Text(self.content_frame, height=5, width=50, font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF")
         self.message_text.grid(row=5, column=1, sticky="ew", padx=10)
         self.message_text.insert(tk.END, "Hello,\nThis is a test email from ShurikenMail.\nBest,\n{sender}")
         ttk.Label(self.content_frame, text="Attachments:", font=("Segoe UI", 9)).grid(row=6, column=0, sticky="w", pady=5)
         self.attachments_var = tk.StringVar()
         ttk.Entry(self.content_frame, textvariable=self.attachments_var, state="readonly", font=("Segoe UI", 9), width=30).grid(row=6, column=1, sticky="ew", padx=10)
-        self.browse_attach_button = tk.Button(self.content_frame, text="Add Attachments", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.browse_attachments)
+        self.browse_attach_button = tk.Button(self.content_frame, text="Add Attachments", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.browse_attachments)
         self.browse_attach_button.grid(row=6, column=2, padx=10)
-        self.browse_attach_button.bind("<Enter>", lambda e: self.browse_attach_button.config(bg="#005A9E"))
-        self.browse_attach_button.bind("<Leave>", lambda e: self.browse_attach_button.config(bg="#0078D4"))
+        self.browse_attach_button.bind("<Enter>", lambda e: self.browse_attach_button.config(bg="#3C3C3C"))
+        self.browse_attach_button.bind("<Leave>", lambda e: self.browse_attach_button.config(bg="#2E2E2E"))
         Tooltip(self.browse_attach_button, "Add attachments (max 25MB; for files >20MB, use Google Drive)")
-
         self.preview_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.preview_tab, text="Preview")
         self.preview_frame = ttk.Frame(self.preview_tab, padding="10")
         self.preview_frame.pack(fill=tk.BOTH, expand=True)
         ttk.Label(self.preview_frame, text="Email Preview:", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=5)
-        self.preview_text = tk.Text(self.preview_frame, height=8, width=50, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000", state="disabled")
+        self.preview_text = tk.Text(self.preview_frame, height=8, width=50, font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", state="disabled")
         self.preview_text.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10)
         self.preview_buttons_frame = ttk.Frame(self.preview_frame)
         self.preview_buttons_frame.grid(row=0, column=1, sticky="e")
-        self.update_preview_button = tk.Button(self.preview_buttons_frame, text="Refresh", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.update_preview)
+        self.update_preview_button = tk.Button(self.preview_buttons_frame, text="Refresh", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.update_preview)
         self.update_preview_button.pack(side=tk.LEFT, padx=10)
-        self.update_preview_button.bind("<Enter>", lambda e: self.update_preview_button.config(bg="#005A9E"))
-        self.update_preview_button.bind("<Leave>", lambda e: self.update_preview_button.config(bg="#0078D4"))
+        self.update_preview_button.bind("<Enter>", lambda e: self.update_preview_button.config(bg="#3C3C3C"))
+        self.update_preview_button.bind("<Leave>", lambda e: self.update_preview_button.config(bg="#2E2E2E"))
         Tooltip(self.update_preview_button, "Refresh preview (Ctrl+P)")
-        self.test_send_button = tk.Button(self.preview_buttons_frame, text="Test Send", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.test_send)
+        self.test_send_button = tk.Button(self.preview_buttons_frame, text="Test Send", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.test_send)
         self.test_send_button.pack(side=tk.LEFT, padx=10)
-        self.test_send_button.bind("<Enter>", lambda e: self.test_send_button.config(bg="#005A9E"))
-        self.test_send_button.bind("<Leave>", lambda e: self.test_send_button.config(bg="#0078D4"))
+        self.test_send_button.bind("<Enter>", lambda e: self.test_send_button.config(bg="#3C3C3C"))
+        self.test_send_button.bind("<Leave>", lambda e: self.test_send_button.config(bg="#2E2E2E"))
         Tooltip(self.test_send_button, "Send test email to your address")
-
-        self.action_frame = tk.Frame(self.main_frame, bg="#FFFFFF")
+        self.action_frame = tk.Frame(self.main_frame, bg="#2E2E2E")
         self.action_frame.pack(fill=tk.X, pady=10)
-        self.send_button = tk.Button(self.action_frame, text="Send Emails", font=("Segoe UI", 12), bg="#28A745", fg="#FFFFFF", bd=0, command=self.start_sending, width=12)
+        self.send_button = tk.Button(self.action_frame, text="Send Emails", font=("Segoe UI", 12), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.start_sending, width=12)
         self.send_button.pack(side=tk.LEFT, padx=10)
-        self.send_button.bind("<Enter>", lambda e: self.send_button.config(bg="#218838"))
-        self.send_button.bind("<Leave>", lambda e: self.send_button.config(bg="#28A745"))
+        self.send_button.bind("<Enter>", lambda e: self.send_button.config(bg="#3C3C3C"))
+        self.send_button.bind("<Leave>", lambda e: self.send_button.config(bg="#2E2E2E"))
         Tooltip(self.send_button, "Send emails to recipients (Ctrl+Enter)")
-
-        self.status_frame = tk.Frame(self.main_frame, bg="#FFFFFF")
+        self.status_frame = tk.Frame(self.main_frame, bg="#2E2E2E")
         self.status_frame.pack(fill=tk.X, pady=10)
         self.status_label = ttk.Label(self.status_frame, text="Ready", font=("Segoe UI", 9))
         self.status_label.pack(side=tk.LEFT, padx=10)
         self.progress = ttk.Progressbar(self.status_frame, mode="determinate")
         self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
-        self.log_toggle_button = tk.Button(self.status_frame, text="View Logs", font=("Segoe UI", 9), bg="#0078D4", fg="#FFFFFF", bd=0, command=self.toggle_log_viewer)
+        self.log_toggle_button = tk.Button(self.status_frame, text="View Logs", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.toggle_log_viewer)
         self.log_toggle_button.pack(side=tk.RIGHT, padx=10)
-        self.log_toggle_button.bind("<Enter>", lambda e: self.log_toggle_button.config(bg="#005A9E"))
-        self.log_toggle_button.bind("<Leave>", lambda e: self.log_toggle_button.config(bg="#0078D4"))
+        self.log_toggle_button.bind("<Enter>", lambda e: self.log_toggle_button.config(bg="#3C3C3C"))
+        self.log_toggle_button.bind("<Leave>", lambda e: self.log_toggle_button.config(bg="#2E2E2E"))
         Tooltip(self.log_toggle_button, "Show/hide log viewer")
-        self.log_frame = tk.Frame(self.main_frame, bg="#FFFFFF")
-        self.log_text = tk.Text(self.log_frame, height=5, font=("Segoe UI", 9), bg="#FFFFFF", fg="#000000", state="disabled")
+        self.log_frame = tk.Frame(self.main_frame, bg="#2E2E2E")
+        self.log_text = tk.Text(self.log_frame, height=5, font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", state="disabled")
         self.log_text.pack(fill=tk.X, padx=10, pady=5)
-        self.reset_log_button = tk.Button(self.log_frame, text="Reset Logs", font=("Segoe UI", 9), bg="#D32F2F", fg="#FFFFFF", bd=0, command=self.reset_fernet_key)
+        self.reset_log_button = tk.Button(self.log_frame, text="Reset Logs", font=("Segoe UI", 9), bg="#2E2E2E", fg="#FFFFFF", bd=0, command=self.reset_fernet_key)
         self.reset_log_button.pack(pady=5)
-        self.reset_log_button.bind("<Enter>", lambda e: self.reset_log_button.config(bg="#B71C1C"))
-        self.reset_log_button.bind("<Leave>", lambda e: self.reset_log_button.config(bg="#D32F2F"))
+        self.reset_log_button.bind("<Enter>", lambda e: self.reset_log_button.config(bg="#3C3C3C"))
+        self.reset_log_button.bind("<Leave>", lambda e: self.reset_log_button.config(bg="#2E2E2E"))
         Tooltip(self.reset_log_button, "Reset encryption key and clear logs")
         self.log_visible = False
-
-        self.notification_frame = tk.Frame(self.main_frame, bg="#FFFFFF", relief="solid", borderwidth=1)
+        self.notification_frame = tk.Frame(self.main_frame, bg="#2E2E2E", relief="solid", borderwidth=1)
         self.notification_frame.pack(fill=tk.X, pady=10)
-        self.notification_label = ttk.Label(self.notification_frame, text="", font=("Segoe UI", 9), background="#FFEBEE", foreground="#D32F2F")
+        self.notification_label = ttk.Label(self.notification_frame, text="", font=("Segoe UI", 9), background="#2E2E2E", foreground="#FFFFFF")
         self.notification_label.pack(fill=tk.X, padx=10, pady=5)
         self.notification_label.bind("<Button-1>", self.handle_notification_click)
 
     def configure_styles(self):
         styles = {
-            "TLabel": {"background": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI", 9), "padding": 5},
-            "TEntry": {"fieldbackground": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI", 9), "borderwidth": 1, "relief": "flat"},
-            "TCombobox": {"fieldbackground": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI", 9), "borderwidth": 1},
-            "TNotebook": {"background": "#FFFFFF", "padding": 5},
-            "TNotebook.Tab": {"background": "#FFFFFF", "foreground": "#000000", "font": ("Segoe UI Semibold", 9), "padding": [10, 5]},
-            "TProgressbar": {"background": "#0078D4", "troughcolor": "#FFFFFF"}
+            "TLabel": {"background": "#2E2E2E", "foreground": "#FFFFFF", "font": ("Segoe UI", 9), "padding": 5},
+            "TEntry": {"fieldbackground": "#2E2E2E", "foreground": "#FFFFFF", "font": ("Segoe UI", 9), "borderwidth": 1, "relief": "flat"},
+            "TCombobox": {"fieldbackground": "#2E2E2E", "foreground": "#FFFFFF", "font": ("Segoe UI", 9), "borderwidth": 1},
+            "TNotebook": {"background": "#2E2E2E", "padding": 5},
+            "TNotebook.Tab": {"background": "#2E2E2E", "foreground": "#FFFFFF", "font": ("Segoe UI Semibold", 9), "padding": [10, 5]},
+            "TProgressbar": {"background": "#2E2E2E", "troughcolor": "#2E2E2E", "foreground": "#FFFFFF"}
         }
         for widget, config in styles.items():
             self.style.configure(widget, **config)
-        self.style.map("TNotebook.Tab", background=[("selected", "#0078D4"), ("active", "#F0F0F0")], foreground=[("selected", "#FFFFFF")])
+        self.style.map("TNotebook.Tab", background=[("selected", "#2E2E2E"), ("active", "#3C3C3C")], foreground=[("selected", "#FFFFFF")])
 
     def update_subject_char_count(self, *args):
         length = len(self.subject_var.get())
         self.subject_char_count.config(text=f"{length}/78")
         if length > 78:
-            self.subject_char_count.config(foreground="#D32F2F")
+            self.subject_char_count.config(foreground="#FFFFFF")
         else:
-            self.subject_char_count.config(foreground="#000000")
+            self.subject_char_count.config(foreground="#FFFFFF")
 
     def init_cipher(self):
         fernet_key = keyring.get_password("ShurikenMail", "fernet_key")
@@ -532,7 +517,7 @@ class ShurikenMail:
                 logging.error(f"Failed to save password: {e}")
                 self.show_notification(f"Failed to save password: {e}")
             finally:
-                self.pass_var.set("")  # Clear password
+                self.pass_var.set("")
         else:
             self.show_notification("Email and password required")
 
@@ -799,7 +784,7 @@ class ShurikenMail:
             message_template = self.message_text.get("1.0", tk.END).strip()
             subject_template = self.subject_var.get()
 
-            rate_limit = 10  # Emails per minute
+            rate_limit = 10
             rate_interval = 60 / rate_limit
             total_emails = len(targets) * count
             self.progress["maximum"] = total_emails
@@ -842,7 +827,7 @@ class ShurikenMail:
                             if retries > max_retries:
                                 failed_emails.append((target, error_msg))
                                 logging.error(f"Failed to send email {i+1}/{count} to recipient: {error_msg}")
-                                audit_logger.info(f"Failed to send email {i+1}/{count}: {error_msg}")
+                                audit_logger.info(f"Failed to send s: {error_msg}")
                                 break
                             time.sleep(2 ** retries)
                             if "disconnected" in error_msg.lower():

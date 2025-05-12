@@ -1,2 +1,35 @@
 2025-04-26 05:59:24,803 - Configuration saved
 2025-04-26 06:00:08,518 - Configuration saved
+2025-04-26 06:16:53,762 - Configuration saved
+2025-05-12 05:41:07,725 - Configuration saved
+2025-05-12 05:43:59,910 - Configuration saved
+2025-05-12 05:49:23,059 - Configuration saved
+2025-05-12 05:49:59,351 - Configuration saved
+2025-05-12 05:56:44,449 - Configuration saved
+2025-05-12 06:01:22,350 - Configuration saved
+2025-05-12 06:06:33,287 - Configuration saved
+2025-05-12 06:08:54,479 - Configuration saved
+2025-05-12 06:09:52,553 - Configuration saved
+2025-05-12 06:10:12,167 - Password saved to keyring
+2025-05-12 06:10:43,945 - Initiated test send
+2025-05-12 06:10:46,951 - SMTP connection established to smtp.gmail.com:587
+2025-05-12 06:10:48,300 - Test email sent successfully
+2025-05-12 06:10:48,425 - SMTP connection closed
+2025-05-12 06:10:53,263 - Preview updated
+2025-05-12 06:10:54,488 - Initiated test send
+2025-05-12 06:10:57,256 - SMTP connection established to smtp.gmail.com:587
+2025-05-12 06:10:58,531 - Test email sent successfully
+2025-05-12 06:10:58,684 - SMTP connection closed
+2025-05-12 06:11:14,784 - Preview updated
+2025-05-12 06:11:24,243 - Initiated test send
+2025-05-12 06:11:26,965 - SMTP connection established to smtp.gmail.com:587
+2025-05-12 06:11:28,146 - Test email sent successfully
+2025-05-12 06:11:28,306 - SMTP connection closed
+2025-05-12 06:12:29,790 - Configuration saved
+2025-05-12 06:12:29,794 - Started email sending process
+2025-05-12 06:12:33,609 - SMTP connection established to smtp.gmail.com:587
+2025-05-12 06:12:33,611 - Email sending completed: 0/0 sent, 0 failed
+2025-05-12 06:12:33,855 - SMTP connection closed
+2025-05-12 06:12:47,432 - Preview updated
+2025-05-12 06:12:55,649 - Preview updated
+2025-05-12 06:12:57,482 - Preview updated
